@@ -17,8 +17,19 @@ Copyright [2016] [Mark Petschek mark@petschek.com]
 
 #set up the imports
 import sys
+import os
 import neurio
-import my_keys
+try:
+    import my_keys
+except ImportError:
+    class my_keys:
+        key = os.environ['key']
+        secret = os.environ['secret']
+        sensor_id = os.environ['sensor_id']
+        location_id = os.environ['location_id']
+        SYSTEMID = os.environ['SYSTEMID']
+        APIKEY = os.environ['APIKEY']
+        DONATION = bool(os.environ['DONATION'])
 import json
 import dateutil.parser
 import getopt
@@ -44,7 +55,7 @@ def log_pvoutput(batchS):
    #upload data to the pvoutput website
 
    #Args:
-   #  bathS (string): the data to be uploaded.  The pvoutput method that 
+   #  bathS (string): the data to be uploaded.  The pvoutput method that
    #                  will be called is the addbatchstatus method.  Documentation
    #                  can be found @ http://pvoutput.org/help.html#api-addbatchstatus
    #                  The data consists of multiple time
@@ -68,9 +79,9 @@ def log_pvoutput(batchS):
    #cmd=('curl -d "data=%s" -H "X-Pvoutput-Apikey:%s" -H "X-Pvoutput-SystemId:%s" \
    #cmd=('curl -x 181.48.229.106:8080 -d "data=%s" -H "X-Pvoutput-Apikey:%s" -H "X-Pvoutput-SystemId:%s" \
    #cmd=('curl -x pvoutput.org:8080 -d "data=%s" -H "X-Pvoutput-Apikey:%s" -H "X-Pvoutput-SystemId:%s" \
-   #     http://pvoutput.org/service/r2/addbatchstatus.jsp' %(batchS,APIKEY,SYSTEMID)) 
+   #     http://pvoutput.org/service/r2/addbatchstatus.jsp' %(batchS,APIKEY,SYSTEMID))
    cmd=('curl -d "data=%s" -H "X-Pvoutput-Apikey:%s" -H "X-Pvoutput-SystemId:%s" \
-        http://pvoutput.org/service/r2/addbatchstatus.jsp' %(batchS,APIKEY,SYSTEMID)) 
+        http://pvoutput.org/service/r2/addbatchstatus.jsp' %(batchS,APIKEY,SYSTEMID))
    #print cmd;
 
    #send the request
@@ -100,14 +111,14 @@ def get_user_information(client,tp):
 
 def main(argv):
 
-        
+
         #make the keys available
         global APIKEY
         global SYSTEMID
-        
+
         entireDay=False
         donation=False
-       
+
         getSensorId=False
 
         ltz = dateutil.tz.tzlocal()
@@ -116,9 +127,9 @@ def main(argv):
         APIKEY=my_keys.APIKEY
         SYSTEMID=my_keys.SYSTEMID
 
-        if my_keys.DONATION: 
+        if my_keys.DONATION:
            maxEntries=100
-        else: 
+        else:
            maxEntries=30
 
 
@@ -142,10 +153,10 @@ def main(argv):
 
         # get the Neurio token
         tp = neurio.TokenProvider(key=my_keys.key,
-                                       secret=my_keys.secret)
+                                  secret=my_keys.secret)
         nc = neurio.Client(token_provider=tp)
 
-        #read the sensor Id 
+        #read the sensor Id
         if getSensorId:
            user_info = get_user_information(nc,tp)
            locations = user_info.get("locations")
@@ -164,7 +175,7 @@ def main(argv):
           etime = stime+datetime.timedelta(days=1)
         etime=etime - datetime.timedelta(hours=1)
 
-        #nuerio uses UTC, so we need to convert localtime to UTC and 
+        #nuerio uses UTC, so we need to convert localtime to UTC and
         #format the strings that neurio expects
         stime = stime.replace(tzinfo=ltz)
         etime = etime.replace(tzinfo=ltz)
@@ -182,7 +193,7 @@ def main(argv):
 
         #build the string from the stats we read
         for item in stats:
- 
+
            #read the time
            time = dateutil.parser.parse(item.get("start")).astimezone(ltz)
            #print time;
@@ -201,7 +212,7 @@ def main(argv):
               log_pvoutput(batchString)
               cnt=0
               batchString=''
-           
+
         #finally check to see if there are any left over entries to uplad
         if cnt > 0:
               log_pvoutput(batchString)
