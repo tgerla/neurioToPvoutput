@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 Copyright [2016] [Mark Petschek mark@petschek.com]
     This program is free software: you can redistribute it and/or modify
@@ -32,6 +32,7 @@ except ImportError:
         DONATION = bool(os.environ['DONATION'])
 import json
 import dateutil.parser
+import dateutil.tz
 import getopt
 import datetime
 import subprocess
@@ -110,112 +111,137 @@ def get_user_information(client,tp):
     return r.json()
 
 def main(argv):
+   #make the keys available
+   global APIKEY
+   global SYSTEMID
 
+   entireDay = False
+   donation = False
 
-        #make the keys available
-        global APIKEY
-        global SYSTEMID
+   getSensorId = False
 
-        entireDay=False
-        donation=False
+   ltz = dateutil.tz.tzlocal()
+   UTCtz = dateutil.tz.tzutc()
 
-        getSensorId=False
+   APIKEY = my_keys.APIKEY
+   SYSTEMID = my_keys.SYSTEMID
 
-        ltz = dateutil.tz.tzlocal()
-        UTCtz = dateutil.tz.tzutc()
+   if my_keys.DONATION:
+      maxEntries = 100
+   else:
+      maxEntries = 30
 
-        APIKEY=my_keys.APIKEY
-        SYSTEMID=my_keys.SYSTEMID
+   try:
+      opts, args = getopt.getopt(argv, "sht:", ["hoursBack"])
+   except getopt.GetoptError:
+      print('neurioToPvoutput -sh -t dHrs ')
+      sys.exit(2)
 
-        if my_keys.DONATION:
-           maxEntries=100
-        else:
-           maxEntries=30
+   for opt, arg in opts:
+      if opt == "-s":
+         getSensorId = True
+      if opt == "-t":
+         dHrs = int(arg)
+         entireDay = True
+      if opt == "-h":
+         print('neurio_pvoutput -udh -t dHrs ')
+         print('-s print sensor id')
+         print('-h print help info')
+         print('-t dHrs - dHrs = number of hours in the past go get the neurio data')
+         sys.exit(0)
 
+   # get the Neurio token
+   tp = neurio.TokenProvider(key=my_keys.key, secret=my_keys.secret)
+   nc = neurio.Client(token_provider=tp)
 
-        try:
-           opts, args = getopt.getopt(argv,"sht:",["hoursBack"])
-        except getopt.GetoptError:
-           print 'neurioToPvoutput -sh -t dHrs '
-           sys.exit(2)
-        for opt, arg in opts:
-           if opt in ("-s"):
-              getSensorId=True
-           if opt in ("-t"):
-              dHrs = int(arg)
-              entireDay=True;
-           if opt in ("-h"):
-              print 'neurio_pvoutput -udh -t dHrs '
-              print '-s print sensor id'
-              print '-h print help info'
-              print '-t dHrs - dHrs = number of hours in the past go get the neurio data'
-              sys.exit(0)
+   #read the sensor Id
+   if getSensorId:
+      user_info = get_user_information(nc, tp)
+      locations = user_info.get("locations")
+      sensors = locations[0].get("sensors")
+      sensorId = sensors[0].get("sensorId")
+      print("Sensor Id = " + sensorId)
+      sys.exit(0)
 
-        # get the Neurio token
-        tp = neurio.TokenProvider(key=my_keys.key,
-                                  secret=my_keys.secret)
-        nc = neurio.Client(token_provider=tp)
+   #Neurio doesnt allow more than a days worth of data in a single request.
+   #For -t, request from now-dHrs up to now (not into the future).
+   if entireDay:
+      etime = datetime.datetime.now()
+      stime = etime - datetime.timedelta(hours=dHrs)
+   else:
+      stime = datetime.datetime.now() - datetime.timedelta(days=1)
+      etime = stime + datetime.timedelta(days=1)
+      etime = etime - datetime.timedelta(hours=1)
 
-        #read the sensor Id
-        if getSensorId:
-           user_info = get_user_information(nc,tp)
-           locations = user_info.get("locations")
-           sensors = locations[0].get("sensors")
-           sensorId = sensors[0].get("sensorId")
-           print "Sensor Id = " + sensorId.encode("utf-8")
-           sys.exit(0)
+   #nuerio uses UTC, so we need to convert localtime to UTC and
+   #format the strings that neurio expects
+   stime = stime.replace(tzinfo=ltz)
+   etime = etime.replace(tzinfo=ltz)
+   stimeString = stime.astimezone(UTCtz).strftime("%Y-%m-%dT%H:%M:%S")
+   etimeString = etime.astimezone(UTCtz).strftime("%Y-%m-%dT%H:%M:%S")
+   #print etimeString;
+   #print stimeString;
 
-        #Neurio doesnt allow more than a days worth of data in a single request
-        #so limit the data to either now - 1day or input offset time + 1 day
-        if entireDay:
-          stime = datetime.datetime.now() - datetime.timedelta(hours=dHrs)
-          etime = stime + datetime.timedelta(days=1)
-        else:
-          stime = datetime.datetime.now() - datetime.timedelta(days=1)
-          etime = stime+datetime.timedelta(days=1)
-        etime=etime - datetime.timedelta(hours=1)
+   #read the data from neurio
+   stats = nc.get_samples_stats(my_keys.sensor_id, stimeString, "minutes", etimeString, 5)
+   #print stats;
 
-        #nuerio uses UTC, so we need to convert localtime to UTC and
-        #format the strings that neurio expects
-        stime = stime.replace(tzinfo=ltz)
-        etime = etime.replace(tzinfo=ltz)
-        stimeString = stime.astimezone(UTCtz).strftime("%Y-%m-%dT%H:%M:%S")
-        etimeString = etime.astimezone(UTCtz).strftime("%Y-%m-%dT%H:%M:%S")
-        #print etimeString;
-        #print stimeString;
+   # The API may return an error dictionary instead of a list of samples.
+   if isinstance(stats, dict):
+      print("Neurio API error:")
+      print(stats)
+      code = stats.get("code")
+      message = stats.get("message")
+      more_info = stats.get("moreInfo")
+      if code:
+         print("code: " + str(code))
+      if message:
+         print("message: " + str(message))
+      if more_info:
+         print("moreInfo: " + str(more_info))
+      sys.exit(1)
 
-        #read the data from neurio
-        stats = nc.get_samples_stats(my_keys.sensor_id,stimeString,"minutes",etimeString,5)
-        #print stats;
+   if not isinstance(stats, list):
+      print("Unexpected response from Neurio API:")
+      print(stats)
+      sys.exit(1)
 
-        cnt = 0;
-        batchString=''
+   cnt = 0
+   batchString = ''
 
-        #build the string from the stats we read
-        for item in stats:
+   #build the string from the stats we read
+   print(stats)
+   for item in stats:
+      if not isinstance(item, dict):
+         continue
 
-           #read the time
-           time = dateutil.parser.parse(item.get("start")).astimezone(ltz)
-           #print time;
+      start_time = item.get("start")
+      if not start_time:
+         continue
 
-           #Read in the Energy and convert it to power in the 5 minute time
-           #Energy is in WattSec, Pvoutput wants watts
-           #So WattSec/3600Sec/Hr*12(5minute periods/hour) = Watts in the 5minute period
-           cons = float(item.get("consumptionEnergy"))/3600*12
-           gen = float(item.get("generationEnergy"))/3600*12
+      #read the time
+      print(item)
+      time = dateutil.parser.parse(start_time).astimezone(ltz)
+      #print time;
 
-           #store the date,time,-1,,generatedPower,-1,consumedPower
-           batchString=batchString+time.strftime("%Y%m%d,%H:%M")+',-1,'+str(int(gen+0.5))+',-1,'+str(int(cons+0.5))+';'
-           cnt = cnt+1
-           #We can't exceed the pvoutput limits so check if we have hit the limit for each batch upload
-           if cnt == maxEntries:
-              log_pvoutput(batchString)
-              cnt=0
-              batchString=''
+      #Read in the Energy and convert it to power in the 5 minute time
+      #Energy is in WattSec, Pvoutput wants watts
+      #So WattSec/3600Sec/Hr*12(5minute periods/hour) = Watts in the 5minute period
+      cons = float(item.get("consumptionEnergy")) / 3600 * 12
+      gen = float(item.get("generationEnergy")) / 3600 * 12
 
-        #finally check to see if there are any left over entries to uplad
-        if cnt > 0:
-              log_pvoutput(batchString)
+      #store the date,time,-1,,generatedPower,-1,consumedPower
+      batchString = batchString + time.strftime("%Y%m%d,%H:%M") + ',-1,' + str(int(gen + 0.5)) + ',-1,' + str(int(cons + 0.5)) + ';'
+      cnt = cnt + 1
+      #We can't exceed the pvoutput limits so check if we have hit the limit for each batch upload
+      if cnt == maxEntries:
+         log_pvoutput(batchString)
+         cnt = 0
+         batchString = ''
+
+   #finally check to see if there are any left over entries to uplad
+   if cnt > 0:
+      log_pvoutput(batchString)
 
 
 if __name__ == '__main__':
